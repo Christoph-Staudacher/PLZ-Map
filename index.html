@@ -56,49 +56,93 @@
 
     let geoLayer = null;
     let plzLayers = [];
-    let dataCache = null;
 
-    function getStyle(zoom) {
-      return {
-        fillColor: 'transparent',
-        fillOpacity: 0,
-        weight: zoom >= 9 ? 2.5 : 0,
-        color: '#333',
-        opacity: zoom >= 9 ? 1 : 0
-      };
+    // GeoJSON laden
+    fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson')
+      .then(res => res.json())
+      .then(data => {
+        geoLayer = L.geoJSON(data, {
+          style: () => ({
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            weight: 1,
+            color: '#666'
+          }),
+          onEachFeature: (feature, layer) => {
+            const plz = feature.properties.plz;
+            const einw = feature.properties.einwohner || 'k.A.';
+            const note = feature.properties.note || '';
+            const qkm = feature.properties.qkm || 0;
+
+            // Nur Metadaten speichern
+            layer._myData = { plz, einw, note, qkm, popupAdded: false, tooltipAdded: false };
+            plzLayers.push({ plz, layer });
+          }
+        }).addTo(map);
+
+        updateFeaturesByZoom();
+      });
+
+    // PLZ-Suche
+    function zoomToPLZ() {
+      const input = document.getElementById('plzInput').value.trim();
+      const found = plzLayers.find(p => p.plz === input);
+      if (found) {
+        const bounds = found.layer.getBounds();
+        map.fitBounds(bounds, { maxZoom: 9 });
+        found.layer.openPopup();
+      } else {
+        alert('PLZ nicht gefunden oder Daten noch nicht geladen.');
+      }
     }
 
-    function addGeoLayer(data) {
+    // Zoom-Level-Auswertung
+    function updateFeaturesByZoom() {
       const zoom = map.getZoom();
+      if (!geoLayer) return;
 
-      geoLayer = L.geoJSON(data, {
-        style: () => getStyle(zoom),
-        onEachFeature: (feature, layer) => {
-          const plz = feature.properties.plz;
-          const einw = feature.properties.einwohner || 'k.A.';
-          const note = feature.properties.note || '';
-          const qkm = feature.properties.qkm || 0;
+      geoLayer.eachLayer(layer => {
+        const d = layer._myData;
+        if (!d) return;
 
-          layer.bindPopup(`<strong>PLZ:</strong> ${plz}<br><strong>Einwohner:</strong> ${einw}<br><em>${note}</em>`);
+        // Linien dicker bei höherem Zoom
+        layer.setStyle({
+          weight: zoom >= 9 ? 2.5 : 1,
+          color: '#333',
+          fillOpacity: 0
+        });
 
+        // Tooltip ab Zoom 10 oder bei großen Gebieten
+        const showTooltip = zoom >= 10 || d.qkm > 1;
+
+        if (showTooltip && !d.tooltipAdded) {
           const tooltip = L.tooltip({
             permanent: true,
             direction: 'center',
             className: 'plz-label',
             opacity: 1
-          }).setContent(plz);
-
+          }).setContent(d.plz);
           layer.bindTooltip(tooltip);
-          layer._myPlzLabel = { tooltip, qkm };
-          layer._myPlzQkm = qkm;
-
-          plzLayers.push({ plz: plz, layer: layer });
+          d.tooltipAdded = true;
         }
-      }).addTo(map);
 
-      updateLabels();
+        // Popup ab Zoom 9
+        if (zoom >= 9 && !d.popupAdded) {
+          const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
+          layer.bindPopup(popup);
+          d.popupAdded = true;
+        }
+
+        // Optional: ausblenden bei niedrigem Zoom
+        if (d.tooltipAdded && layer.getTooltip()) {
+          const el = layer.getTooltip().getElement();
+          if (el) el.style.display = showTooltip ? 'block' : 'none';
+        }
+      });
     }
 
-    function removeGeoLayer() {
-      if (geoLayer) {
-        map.rem
+    // Auf Zoomänderungen reagieren
+    map.on('zoomend', updateFeaturesByZoom);
+  </script>
+</body>
+</html>
