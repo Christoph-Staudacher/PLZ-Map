@@ -55,11 +55,11 @@
 
   <div id="plz-search">
     <label for="plzInput">PLZ eingeben: </label>
-    <input type="text" id="plzInput" placeholder="z.B. 83022" />
+    <input type="text" id="plzInput" placeholder="z.B. 83024" />
     <button onclick="zoomToPLZ()">Suchen</button>
     |
     <label>
-      <input type="checkbox" id="toggleMarkers" checked />
+      <input type="checkbox" id="toggleMarkers" />
       Marker immer anzeigen
     </label>
   </div>
@@ -117,7 +117,7 @@
       .then(res => res.json())
       .then(data => {
         markerFeatures = data.features.map(feature => {
-          const type = (feature.properties.netztyp || '').toUpperCase();
+          const type = (feature.properties.Netzform || '').toUpperCase();
           let cssClass = 'marker-unbekannt';
 
           if (type === 'TT') cssClass = 'marker-tt';
