@@ -58,17 +58,27 @@
     let geoLayer = null;
     let plzLayers = [];
 
+    // ** === ZOOMSTUFE ANPASSUNGEN === **
+    const ZOOM_TOOLTIP_MIN = 11;  // Tooltip erst ab Zoomstufe 11 anzeigen
+    const ZOOM_POLYGON_MIN = 11;  // Polygonumriss erst ab Zoomstufe 11 anzeigen
+    const ZOOM_POPUP_MIN = 9;     // Popup ab Zoomstufe 9 anzeigen (kannst du anpassen)
+    // ** ============================ **
+
     // GeoJSON laden
     fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson')
       .then(res => res.json())
       .then(data => {
         geoLayer = L.geoJSON(data, {
-          style: () => ({
-            fillColor: 'transparent',
-            fillOpacity: 0,
-            weight: 1,
-            color: '#666'
-          }),
+          style: (feature) => {
+            const zoom = map.getZoom();
+            // Polygonumriss nur ab ZOOM_POLYGON_MIN sichtbar, sonst transparent
+            return {
+              fillColor: 'transparent',
+              fillOpacity: 0,
+              weight: zoom >= ZOOM_POLYGON_MIN ? 2.5 : 0,
+              color: zoom >= ZOOM_POLYGON_MIN ? '#333' : 'transparent',
+            };
+          },
           onEachFeature: (feature, layer) => {
             const plz = feature.properties.plz;
             const einw = feature.properties.einwohner || 'k.A.';
@@ -90,7 +100,7 @@
       const found = plzLayers.find(p => p.plz === input);
       if (found) {
         const bounds = found.layer.getBounds();
-        map.fitBounds(bounds, { maxZoom: 9 });
+        map.fitBounds(bounds, { maxZoom: ZOOM_POPUP_MIN });
         found.layer.openPopup();
       } else {
         alert('PLZ nicht gefunden oder Daten noch nicht geladen.');
@@ -106,15 +116,15 @@
         const d = layer._myData;
         if (!d) return;
 
-        // Linien dicker bei höherem Zoom
+        // Polygonumriss aktualisieren (optional, falls dynamisch)
         layer.setStyle({
-          weight: zoom >= 9 ? 2.5 : 1,
-          color: '#333',
+          weight: zoom >= ZOOM_POLYGON_MIN ? 2.5 : 0,
+          color: zoom >= ZOOM_POLYGON_MIN ? '#333' : 'transparent',
           fillOpacity: 0
         });
 
-        // Tooltip ab Zoom 9 für ALLE Polygone (unabhängig von Größe)
-        const showTooltip = zoom >= 9;
+        // Tooltip nur ab Zoomstufe ZOOM_TOOLTIP_MIN anzeigen
+        const showTooltip = zoom >= ZOOM_TOOLTIP_MIN;
 
         if (showTooltip && !d.tooltipAdded) {
           const tooltip = L.tooltip({
@@ -127,23 +137,23 @@
           d.tooltipAdded = true;
         }
 
-        // Popup ab Zoom 9
-        if (zoom >= 9 && !d.popupAdded) {
-          const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
-          layer.bindPopup(popup);
-          d.popupAdded = true;
-        }
-
-        // Tooltip anzeigen/ausblenden je nach Zoom
         if (d.tooltipAdded && layer.getTooltip()) {
           const el = layer.getTooltip().getElement();
           if (el) el.style.display = showTooltip ? 'block' : 'none';
         }
+
+        // Popup ab Zoomstufe ZOOM_POPUP_MIN anzeigen
+        if (zoom >= ZOOM_POPUP_MIN && !d.popupAdded) {
+          const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
+          layer.bindPopup(popup);
+          d.popupAdded = true;
+        }
       });
     }
 
-    // Auf Zoomänderungen reagieren
+    // Zoom-End-Event zum Update aufrufen
     map.on('zoomend', updateFeaturesByZoom);
   </script>
 </body>
 </html>
+
