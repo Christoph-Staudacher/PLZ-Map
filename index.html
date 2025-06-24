@@ -39,7 +39,7 @@
     }).addTo(map);
 
     // GeoJSON laden
-    fetch('https://christoph-staudacher.github.io/Netzkartendaten/Netzformen.geojson') // << URL zur Datei hier einsetzen
+    fetch('christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson') // << URL zur Datei hier einsetzen
       .then(response => response.json())
       .then(data => {
         // Farben dynamisch je nach Einwohnerzahl
