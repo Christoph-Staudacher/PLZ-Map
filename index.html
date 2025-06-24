@@ -107,24 +107,31 @@
       }
     }
 
-    // Zoom-Level-Auswertung
+    // Zoom-Level-Auswertung mit Viewport-Sichtbarkeitsfilter
     function updateFeaturesByZoom() {
       const zoom = map.getZoom();
       if (!geoLayer) return;
+
+      const bounds = map.getBounds();
 
       geoLayer.eachLayer(layer => {
         const d = layer._myData;
         if (!d) return;
 
-        // Polygonumriss aktualisieren (optional, falls dynamisch)
+        // Prüfen, ob Polygon im aktuellen Viewport sichtbar ist
+        const isVisibleInView = bounds.intersects(layer.getBounds());
+
+        // Polygonumriss nur sichtbar bei ausreichendem Zoom UND wenn im Viewport
+        const showPolygon = zoom >= ZOOM_POLYGON_MIN && isVisibleInView;
+
         layer.setStyle({
-          weight: zoom >= ZOOM_POLYGON_MIN ? 2.5 : 0,
-          color: zoom >= ZOOM_POLYGON_MIN ? '#333' : 'transparent',
+          weight: showPolygon ? 2.5 : 0,
+          color: showPolygon ? '#333' : 'transparent',
           fillOpacity: 0
         });
 
-        // Tooltip nur ab Zoomstufe ZOOM_TOOLTIP_MIN anzeigen
-        const showTooltip = zoom >= ZOOM_TOOLTIP_MIN;
+        // Tooltip nur sichtbar bei ausreichend Zoom UND wenn im Viewport
+        const showTooltip = zoom >= ZOOM_TOOLTIP_MIN && isVisibleInView;
 
         if (showTooltip && !d.tooltipAdded) {
           const tooltip = L.tooltip({
@@ -142,7 +149,7 @@
           if (el) el.style.display = showTooltip ? 'block' : 'none';
         }
 
-        // Popup ab Zoomstufe ZOOM_POPUP_MIN anzeigen
+        // Popup ab ZOOM_POPUP_MIN (keine Viewport-Prüfung, da Popup durch Klick getriggert wird)
         if (zoom >= ZOOM_POPUP_MIN && !d.popupAdded) {
           const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
           layer.bindPopup(popup);
@@ -151,9 +158,9 @@
       });
     }
 
-    // Zoom-End-Event zum Update aufrufen
+    // Karte reagiert auf Zoom- und Bewegungsende, um Features zu aktualisieren
     map.on('zoomend', updateFeaturesByZoom);
+    map.on('moveend', updateFeaturesByZoom);
   </script>
 </body>
 </html>
-
