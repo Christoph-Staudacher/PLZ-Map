@@ -25,14 +25,29 @@
       font-family: sans-serif;
     }
     .plz-label {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: bold;
       background: transparent !important;
       padding: 0 !important;
       border: none !important;
       color: #333;
-      text-shadow: 1px 1px 1px white; /* optional für bessere Lesbarkeit */
+      text-shadow: 1px 1px 1px white;
       pointer-events: none;
+    }
+    .marker-tt {
+      background-color: red;
+    }
+    .marker-tn {
+      background-color: green;
+    }
+    .marker-unbekannt {
+      background-color: rgba(128, 128, 128, 0.5);
+    }
+    .custom-marker {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 1px solid white;
     }
   </style>
 </head>
@@ -40,18 +55,13 @@
 
   <div id="plz-search">
     <label for="plzInput">PLZ eingeben: </label>
-    <input type="text" id="plzInput" placeholder="z.B. 83064" />
-    <script>
-  // Enter-Taste löst die PLZ-Suche aus
-  document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('plzInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        zoomToPLZ();
-      }
-    });
-  });
-</script>
+    <input type="text" id="plzInput" placeholder="z.B. 81248" />
     <button onclick="zoomToPLZ()">Suchen</button>
+    |
+    <label>
+      <input type="checkbox" id="toggleMarkers" checked />
+      Marker immer anzeigen
+    </label>
   </div>
 
   <div id="map"></div>
@@ -67,35 +77,33 @@
 
     let geoLayer = null;
     let plzLayers = [];
+    let markerLayer = L.layerGroup().addTo(map);
+    let markerFeatures = [];
 
-    // ** === ZOOMSTUFE ANPASSUNGEN === **
-    const ZOOM_TOOLTIP_MIN = 11;  // Tooltip erst ab Zoomstufe 11 anzeigen
-    const ZOOM_POLYGON_MIN = 11;  // Polygonumriss erst ab Zoomstufe 11 anzeigen
-    const ZOOM_POPUP_MIN = 11;     // Popup ab Zoomstufe 9 anzeigen (kannst du anpassen)
-    // ** ============================ **
+    const ZOOM_TOOLTIP_MIN = 11;
+    const ZOOM_POLYGON_MIN = 11;
+    const ZOOM_POPUP_MIN = 9;
+    const ZOOM_MARKER_MIN = 11;
 
-    // GeoJSON laden
+    const netzkartenGeojsonURL = 'https://christoph-staudacher.github.io/Netzkartendaten/netzkarte.geojson'; // <-- Hier deinen Pfad einsetzen
+
+    // === PLZ-GeoJSON laden ===
     fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson')
       .then(res => res.json())
       .then(data => {
         geoLayer = L.geoJSON(data, {
-          style: (feature) => {
-            const zoom = map.getZoom();
-            // Polygonumriss nur ab ZOOM_POLYGON_MIN sichtbar, sonst transparent
-            return {
-              fillColor: 'transparent',
-              fillOpacity: 0,
-              weight: zoom >= ZOOM_POLYGON_MIN ? 2.5 : 0,
-              color: zoom >= ZOOM_POLYGON_MIN ? '#333' : 'transparent',
-            };
-          },
+          style: () => ({
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            weight: 0,
+            color: 'transparent',
+          }),
           onEachFeature: (feature, layer) => {
             const plz = feature.properties.plz;
             const einw = feature.properties.einwohner || 'k.A.';
             const note = feature.properties.note || '';
             const qkm = feature.properties.qkm || 0;
 
-            // Metadaten speichern
             layer._myData = { plz, einw, note, qkm, popupAdded: false, tooltipAdded: false };
             plzLayers.push({ plz, layer });
           }
@@ -104,7 +112,34 @@
         updateFeaturesByZoom();
       });
 
-    // PLZ-Suche
+    // === Netzkarte-Marker laden ===
+    fetch(netzkartenGeojsonURL)
+      .then(res => res.json())
+      .then(data => {
+        markerFeatures = data.features.map(feature => {
+          const type = (feature.properties.netztyp || '').toUpperCase();
+          let cssClass = 'marker-unbekannt';
+
+          if (type === 'TT') cssClass = 'marker-tt';
+          else if (type === 'TN') cssClass = 'marker-tn';
+
+          const icon = L.divIcon({
+            className: `custom-marker ${cssClass}`,
+            iconSize: [12, 12]
+          });
+
+          const marker = L.marker([feature.geometry.coordinates[1], feature.geometry.coordinates[0]], {
+            icon
+          });
+
+          marker._geoBounds = L.latLngBounds([marker.getLatLng()]);
+          return marker;
+        });
+
+        updateMarkersByZoom();
+      });
+
+    // === PLZ-Suchfunktion ===
     function zoomToPLZ() {
       const input = document.getElementById('plzInput').value.trim();
       const found = plzLayers.find(p => p.plz === input);
@@ -117,31 +152,25 @@
       }
     }
 
-    // Zoom-Level-Auswertung mit Viewport-Sichtbarkeitsfilter
+    // === Tooltip & Umriss aktualisieren ===
     function updateFeaturesByZoom() {
       const zoom = map.getZoom();
       if (!geoLayer) return;
-
       const bounds = map.getBounds();
 
       geoLayer.eachLayer(layer => {
         const d = layer._myData;
         if (!d) return;
 
-        // Prüfen, ob Polygon im aktuellen Viewport sichtbar ist
-        const isVisibleInView = bounds.intersects(layer.getBounds());
-
-        // Polygonumriss nur sichtbar bei ausreichendem Zoom UND wenn im Viewport
-        const showPolygon = zoom >= ZOOM_POLYGON_MIN && isVisibleInView;
+        const inView = bounds.intersects(layer.getBounds());
+        const showLine = zoom >= ZOOM_POLYGON_MIN && inView;
+        const showTooltip = zoom >= ZOOM_TOOLTIP_MIN && inView;
 
         layer.setStyle({
-          weight: showPolygon ? 2.5 : 0,
-          color: showPolygon ? '#333' : 'transparent',
+          weight: showLine ? 2.5 : 0,
+          color: showLine ? '#333' : 'transparent',
           fillOpacity: 0
         });
-
-        // Tooltip nur sichtbar bei ausreichend Zoom UND wenn im Viewport
-        const showTooltip = zoom >= ZOOM_TOOLTIP_MIN && isVisibleInView;
 
         if (showTooltip && !d.tooltipAdded) {
           const tooltip = L.tooltip({
@@ -159,7 +188,6 @@
           if (el) el.style.display = showTooltip ? 'block' : 'none';
         }
 
-        // Popup ab ZOOM_POPUP_MIN (keine Viewport-Prüfung, da Popup durch Klick getriggert wird)
         if (zoom >= ZOOM_POPUP_MIN && !d.popupAdded) {
           const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
           layer.bindPopup(popup);
@@ -168,9 +196,47 @@
       });
     }
 
-    // Karte reagiert auf Zoom- und Bewegungsende, um Features zu aktualisieren
-    map.on('zoomend', updateFeaturesByZoom);
-    map.on('moveend', updateFeaturesByZoom);
+    // === Markeranzeige aktualisieren ===
+    function updateMarkersByZoom() {
+      const zoom = map.getZoom();
+      const bounds = map.getBounds();
+      const alwaysVisible = document.getElementById('toggleMarkers').checked;
+
+      markerLayer.clearLayers();
+
+      markerFeatures.forEach(marker => {
+        const inView = bounds.intersects(marker._geoBounds);
+        const showMarker = alwaysVisible || (zoom >= ZOOM_MARKER_MIN && inView);
+
+        if (showMarker) {
+          markerLayer.addLayer(marker);
+        }
+      });
+    }
+
+    // === Eventlistener ===
+    map.on('zoomend', () => {
+      updateFeaturesByZoom();
+      updateMarkersByZoom();
+    });
+
+    map.on('moveend', () => {
+      updateFeaturesByZoom();
+      updateMarkersByZoom();
+    });
+
+    // === Enter-Taste im Eingabefeld aktiviert Suche ===
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('plzInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          zoomToPLZ();
+        }
+      });
+
+      document.getElementById('toggleMarkers').addEventListener('change', () => {
+        updateMarkersByZoom();
+      });
+    });
   </script>
 </body>
 </html>
