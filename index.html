@@ -48,29 +48,32 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
   <script>
-    const map = L.map('map').setView([51.2, 10.5], 6); // Startzoom
+    const map = L.map('map').setView([51.2, 10.5], 6);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap-Mitwirkende'
     }).addTo(map);
 
+    let geoLayer = null;
     let plzLayers = [];
+    let dataCache = null;
 
-    fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson')
-      .then(response => response.json())
-      .then(data => {
+    function getStyle(zoom) {
+      return {
+        fillColor: 'transparent',
+        fillOpacity: 0,
+        weight: zoom >= 9 ? 2.5 : 0,
+        color: '#333',
+        opacity: zoom >= 9 ? 1 : 0
+      };
+    }
 
-        function getDynamicStyle(zoom, qkm) {
-          return {
-            fillColor: 'transparent', // Keine Füllung
-            fillOpacity: 0,
-            weight: zoom >= 9 ? 2.5 : 0, // Nur ab Zoom 9 sichtbar
-            opacity: zoom >= 9 ? 1 : 0,
-            color: '#333' // dunkle Umrisslinie
-          };
-        }
+    function addGeoLayer(data) {
+      const zoom = map.getZoom();
 
-        function onEachFeature(feature, layer) {
+      geoLayer = L.geoJSON(data, {
+        style: () => getStyle(zoom),
+        onEachFeature: (feature, layer) => {
           const plz = feature.properties.plz;
           const einw = feature.properties.einwohner || 'k.A.';
           const note = feature.properties.note || '';
@@ -88,48 +91,14 @@
           layer.bindTooltip(tooltip);
           layer._myPlzLabel = { tooltip, qkm };
           layer._myPlzQkm = qkm;
+
           plzLayers.push({ plz: plz, layer: layer });
         }
+      }).addTo(map);
 
-        const geoLayer = L.geoJSON(data, {
-          style: feature => getDynamicStyle(map.getZoom(), feature.properties.qkm),
-          onEachFeature: onEachFeature
-        }).addTo(map);
-
-        map.on('zoomend', () => {
-          const currentZoom = map.getZoom();
-
-          // Aktualisiere Style der Polygone je nach Zoom
-          geoLayer.eachLayer(layer => {
-            const qkm = layer._myPlzQkm || 0;
-            const newStyle = getDynamicStyle(currentZoom, qkm);
-            layer.setStyle(newStyle);
-
-            // Labels je nach Zoom sichtbar machen
-            if (layer._myPlzLabel) {
-              const { tooltip } = layer._myPlzLabel;
-              tooltip._container.style.display = (qkm > 0.3 || currentZoom >= 10) ? 'block' : 'none';
-            }
-          });
-        });
-
-        // Initiale Darstellung anpassen
-        map.fire('zoomend');
-      });
-
-    // PLZ-Suchfunktion
-    function zoomToPLZ() {
-      const input = document.getElementById('plzInput').value.trim();
-      const found = plzLayers.find(p => p.plz === input);
-
-      if (found) {
-        const bounds = found.layer.getBounds();
-        map.fitBounds(bounds, { maxZoom: 9 });
-        found.layer.openPopup();
-      } else {
-        alert('PLZ nicht gefunden.');
-      }
+      updateLabels();
     }
-  </script>
-</body>
-</html>
+
+    function removeGeoLayer() {
+      if (geoLayer) {
+        map.rem
