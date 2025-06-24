@@ -27,11 +27,12 @@
     .plz-label {
       font-size: 12px;
       font-weight: bold;
-      background: rgba(255, 255, 255, 0.75);
-      padding: 2px 5px;
-      border-radius: 4px;
-      border: 1px solid #999;
+      background: transparent !important;
+      padding: 0 !important;
+      border: none !important;
       color: #333;
+      text-shadow: 1px 1px 1px white; /* optional für bessere Lesbarkeit */
+      pointer-events: none;
     }
   </style>
 </head>
@@ -74,7 +75,7 @@
             const note = feature.properties.note || '';
             const qkm = feature.properties.qkm || 0;
 
-            // Nur Metadaten speichern
+            // Metadaten speichern
             layer._myData = { plz, einw, note, qkm, popupAdded: false, tooltipAdded: false };
             plzLayers.push({ plz, layer });
           }
@@ -112,8 +113,8 @@
           fillOpacity: 0
         });
 
-        // Tooltip ab Zoom 10 oder bei großen Gebieten
-        const showTooltip = zoom >= 10 || d.qkm > 1;
+        // Tooltip ab Zoom 9 für ALLE Polygone (unabhängig von Größe)
+        const showTooltip = zoom >= 9;
 
         if (showTooltip && !d.tooltipAdded) {
           const tooltip = L.tooltip({
@@ -133,7 +134,7 @@
           d.popupAdded = true;
         }
 
-        // Optional: ausblenden bei niedrigem Zoom
+        // Tooltip anzeigen/ausblenden je nach Zoom
         if (d.tooltipAdded && layer.getTooltip()) {
           const el = layer.getTooltip().getElement();
           if (el) el.style.display = showTooltip ? 'block' : 'none';
