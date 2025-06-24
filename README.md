@@ -1,1 +1,82 @@
-# PLZ-Map
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>PLZ-Karte</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha512-sA+e2OQwMQuzJc4B9sOmFq2K4cBv8YgN1HzDi4hX2vF7DChg2ewCvZ9rErIbkC5IYDiGbEMxUORe0P06s88sAw=="
+    crossorigin=""
+  />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    #map {
+      width: 100%;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha512-YL+R+xDGE5s9n4db+H4pMGKQYb5zK0E5e2bE/NK2vV9jTUnY2yF3ZzB3SlQOCF/Secddhz0a3U9G+mkibp+eKg=="
+    crossorigin=""
+  ></script>
+
+  <script>
+    // Karte initialisieren
+    const map = L.map('map').setView([51.2, 10.5], 6); // Deutschland-Zentrum
+
+    // Hintergrundkarte
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap-Mitwirkende'
+    }).addTo(map);
+
+    // GeoJSON laden
+    fetch('(https://github.com/Christoph-Staudacher/Netzkartendaten/blob/main/daten/plz-5stellig-centroid%20(1).geojson)') // << URL zur Datei hier einsetzen
+      .then(response => response.json())
+      .then(data => {
+        // Farben dynamisch je nach Einwohnerzahl
+        function getColor(einwohner) {
+          return einwohner > 10000 ? '#800026' :
+                 einwohner > 5000  ? '#BD0026' :
+                 einwohner > 1000  ? '#E31A1C' :
+                 einwohner > 100   ? '#FD8D3C' :
+                 einwohner > 0     ? '#FED976' :
+                                     '#FFEDA0';
+        }
+
+        function style(feature) {
+          return {
+            fillColor: getColor(feature.properties.einwohner),
+            weight: 1,
+            opacity: 1,
+            color: 'gray',
+            fillOpacity: 0.6
+          };
+        }
+
+        function onEachFeature(feature, layer) {
+          const plz = feature.properties.plz;
+          const einw = feature.properties.einwohner;
+          const note = feature.properties.note || '';
+          layer.bindPopup(`<strong>PLZ:</strong> ${plz}<br><strong>Einwohner:</strong> ${einw}<br><em>${note}</em>`);
+        }
+
+        // GeoJSON zur Karte hinzufügen
+        L.geoJSON(data, {
+          style: style,
+          onEachFeature: onEachFeature
+        }).addTo(map);
+      });
+  </script>
+</body>
+</html>
