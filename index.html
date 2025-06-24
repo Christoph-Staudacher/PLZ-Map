@@ -40,7 +40,17 @@
 
   <div id="plz-search">
     <label for="plzInput">PLZ eingeben: </label>
-    <input type="text" id="plzInput" placeholder="z.B. 81248" />
+    <input type="text" id="plzInput" placeholder="z.B. 83064" />
+    <script>
+  // Enter-Taste löst die PLZ-Suche aus
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('plzInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        zoomToPLZ();
+      }
+    });
+  });
+</script>
     <button onclick="zoomToPLZ()">Suchen</button>
   </div>
 
