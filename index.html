@@ -62,6 +62,12 @@
       <input type="checkbox" id="toggleMarkers" />
       Marker immer anzeigen
     </label>
+    |
+    <label>
+  <input type="checkbox" id="togglePlzLabels" checked />
+  PLZ-Labels anzeigen
+</label>
+
   </div>
 
   <div id="map"></div>
@@ -77,6 +83,7 @@
 
     let geoLayer = null;
     let plzLayers = [];
+    let lastHighlightedLayer = null;
     let markerLayer = L.layerGroup().addTo(map);
     let markerFeatures = [];
 
@@ -139,62 +146,82 @@
         updateMarkersByZoom();
       });
 
-    // === PLZ-Suchfunktion ===
-    function zoomToPLZ() {
-      const input = document.getElementById('plzInput').value.trim();
-      const found = plzLayers.find(p => p.plz === input);
-      if (found) {
-        const bounds = found.layer.getBounds();
-        map.fitBounds(bounds, { maxZoom: ZOOM_POPUP_MIN });
-        found.layer.openPopup();
-      } else {
-        alert('PLZ nicht gefunden oder Daten noch nicht geladen.');
-      }
+function zoomToPLZ() {
+  const input = document.getElementById('plzInput').value.trim();
+  const found = plzLayers.find(p => p.plz === input);
+  if (found) {
+    const bounds = found.layer.getBounds();
+    map.fitBounds(bounds, { maxZoom: ZOOM_POPUP_MIN });
+    found.layer.openPopup();
+
+    // Alte Hervorhebung entfernen
+    if (lastHighlightedLayer) {
+      lastHighlightedLayer.setStyle({ fillColor: 'transparent', fillOpacity: 0 });
     }
+
+    // Neue Hervorhebung gelb
+    found.layer.setStyle({ fillColor: 'yellow', fillOpacity: 0.2 });
+    lastHighlightedLayer = found.layer;
+  } else {
+    alert('PLZ nicht gefunden oder Daten noch nicht geladen.');
+  }
+}
+
 
     // === Tooltip & Umriss aktualisieren ===
-    function updateFeaturesByZoom() {
-      const zoom = map.getZoom();
-      if (!geoLayer) return;
-      const bounds = map.getBounds();
+function updateFeaturesByZoom() {
+  const zoom = map.getZoom();
+  const bounds = map.getBounds();
+  const labelToggle = document.getElementById('togglePlzLabels');
+  const showTooltipAllowed = labelToggle && labelToggle.checked;
 
-      geoLayer.eachLayer(layer => {
-        const d = layer._myData;
-        if (!d) return;
+  if (!geoLayer) return;
 
-        const inView = bounds.intersects(layer.getBounds());
-        const showLine = zoom >= ZOOM_POLYGON_MIN && inView;
-        const showTooltip = zoom >= ZOOM_TOOLTIP_MIN && inView;
+  geoLayer.eachLayer(layer => {
+    const d = layer._myData;
+    if (!d) return;
 
-        layer.setStyle({
-          weight: showLine ? 2.5 : 0,
-          color: showLine ? '#333' : 'transparent',
-          fillOpacity: 0
-        });
+    const inView = bounds.intersects(layer.getBounds());
 
-        if (showTooltip && !d.tooltipAdded) {
-          const tooltip = L.tooltip({
-            permanent: true,
-            direction: 'center',
-            className: 'plz-label',
-            opacity: 1
-          }).setContent(d.plz);
-          layer.bindTooltip(tooltip);
-          d.tooltipAdded = true;
-        }
+    // === Linien-Sichtbarkeit ===
+    const showLine = zoom >= ZOOM_POLYGON_MIN && inView;
+    layer.setStyle({
+      weight: showLine ? 2.5 : 0,
+      color: showLine ? '#333' : 'transparent',
+      fillOpacity: (lastHighlightedLayer === layer) ? 0.2 : 0,
+      fillColor: (lastHighlightedLayer === layer) ? 'yellow' : 'transparent'
+    });
 
-        if (d.tooltipAdded && layer.getTooltip()) {
-          const el = layer.getTooltip().getElement();
-          if (el) el.style.display = showTooltip ? 'block' : 'none';
-        }
+    // === Tooltip-Sichtbarkeit ===
+    const showTooltip = zoom >= ZOOM_TOOLTIP_MIN && inView;
+    const finalShowTooltip = showTooltip && showTooltipAllowed;
 
-        if (zoom >= ZOOM_POPUP_MIN && !d.popupAdded) {
-          const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
-          layer.bindPopup(popup);
-          d.popupAdded = true;
-        }
-      });
+    if (finalShowTooltip && !d.tooltipAdded) {
+      const tooltip = L.tooltip({
+        permanent: true,
+        direction: 'center',
+        className: 'plz-label',
+        opacity: 1
+      }).setContent(d.plz);
+      layer.bindTooltip(tooltip);
+      d.tooltipAdded = true;
     }
+
+    // === Tooltip ein-/ausblenden ===
+    if (d.tooltipAdded && layer.getTooltip()) {
+      const el = layer.getTooltip().getElement();
+      if (el) el.style.display = finalShowTooltip ? 'block' : 'none';
+    }
+
+    // === Popup bei Zoom 9+ ===
+    if (zoom >= ZOOM_POPUP_MIN && !d.popupAdded) {
+      const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
+      layer.bindPopup(popup);
+      d.popupAdded = true;
+    }
+  });
+}
+
 
     // === Markeranzeige aktualisieren ===
     function updateMarkersByZoom() {
