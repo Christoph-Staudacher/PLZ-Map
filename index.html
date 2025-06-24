@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>PLZ-Karte</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -17,64 +17,119 @@
     }
     #map {
       width: 100%;
-      height: 100vh;
+      height: 90vh;
+    }
+    #plz-search {
+      padding: 10px;
+      background: #f8f8f8;
+      font-family: sans-serif;
+    }
+    .plz-label {
+      font-size: 12px;
+      font-weight: bold;
+      background: rgba(255, 255, 255, 0.75);
+      padding: 2px 5px;
+      border-radius: 4px;
+      border: 1px solid #999;
+      color: #333;
     }
   </style>
 </head>
 <body>
+
+  <div id="plz-search">
+    <label for="plzInput">PLZ eingeben: </label>
+    <input type="text" id="plzInput" placeholder="z.B. 81248" />
+    <button onclick="zoomToPLZ()">Suchen</button>
+  </div>
+
   <div id="map"></div>
 
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    crossorigin=""
-  ></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
   <script>
-    // Karte initialisieren
-    const map = L.map('map').setView([51.2, 10.5], 6); // Deutschland-Zentrum
+    const map = L.map('map').setView([51.2, 10.5], 6); // Startzoom
 
-    // Hintergrundkarte
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap-Mitwirkende'
     }).addTo(map);
 
-    // GeoJSON laden
-    fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson') // << URL zur Datei hier einsetzen
+    let plzLayers = [];
+
+    fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson')
       .then(response => response.json())
       .then(data => {
-        // Farben dynamisch je nach Einwohnerzahl
-        function getColor(einwohner) {
-          return einwohner > 10000 ? '#800026' :
-                 einwohner > 5000  ? '#BD0026' :
-                 einwohner > 1000  ? '#E31A1C' :
-                 einwohner > 100   ? '#FD8D3C' :
-                 einwohner > 0     ? '#FED976' :
-                                     '#FFEDA0';
-        }
 
-        function style(feature) {
+        function getDynamicStyle(zoom, qkm) {
           return {
-            fillColor: getColor(feature.properties.einwohner),
-            weight: 1,
-            opacity: 1,
-            color: 'gray',
-            fillOpacity: 0.6
+            fillColor: 'transparent', // Keine Füllung
+            fillOpacity: 0,
+            weight: zoom >= 9 ? 2.5 : 0, // Nur ab Zoom 9 sichtbar
+            opacity: zoom >= 9 ? 1 : 0,
+            color: '#333' // dunkle Umrisslinie
           };
         }
 
         function onEachFeature(feature, layer) {
           const plz = feature.properties.plz;
-          const einw = feature.properties.einwohner;
+          const einw = feature.properties.einwohner || 'k.A.';
           const note = feature.properties.note || '';
+          const qkm = feature.properties.qkm || 0;
+
           layer.bindPopup(`<strong>PLZ:</strong> ${plz}<br><strong>Einwohner:</strong> ${einw}<br><em>${note}</em>`);
+
+          const tooltip = L.tooltip({
+            permanent: true,
+            direction: 'center',
+            className: 'plz-label',
+            opacity: 1
+          }).setContent(plz);
+
+          layer.bindTooltip(tooltip);
+          layer._myPlzLabel = { tooltip, qkm };
+          layer._myPlzQkm = qkm;
+          plzLayers.push({ plz: plz, layer: layer });
         }
 
-        // GeoJSON zur Karte hinzufügen
-        L.geoJSON(data, {
-          style: style,
+        const geoLayer = L.geoJSON(data, {
+          style: feature => getDynamicStyle(map.getZoom(), feature.properties.qkm),
           onEachFeature: onEachFeature
         }).addTo(map);
+
+        map.on('zoomend', () => {
+          const currentZoom = map.getZoom();
+
+          // Aktualisiere Style der Polygone je nach Zoom
+          geoLayer.eachLayer(layer => {
+            const qkm = layer._myPlzQkm || 0;
+            const newStyle = getDynamicStyle(currentZoom, qkm);
+            layer.setStyle(newStyle);
+
+            // Labels je nach Zoom sichtbar machen
+            if (layer._myPlzLabel) {
+              const { tooltip } = layer._myPlzLabel;
+              tooltip._container.style.display = (qkm > 0.3 || currentZoom >= 10) ? 'block' : 'none';
+            }
+          });
+        });
+
+        // Initiale Darstellung anpassen
+        map.fire('zoomend');
       });
+
+    // PLZ-Suchfunktion
+    function zoomToPLZ() {
+      const input = document.getElementById('plzInput').value.trim();
+      const found = plzLayers.find(p => p.plz === input);
+
+      if (found) {
+        const bounds = found.layer.getBounds();
+        map.fitBounds(bounds, { maxZoom: 9 });
+        found.layer.openPopup();
+      } else {
+        alert('PLZ nicht gefunden.');
+      }
+    }
   </script>
 </body>
 </html>
