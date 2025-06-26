@@ -11,69 +11,53 @@
   />
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
+      margin: 0; padding: 0; height: 100%;
     }
     #map {
-      width: 100%;
-      height: 90vh;
+      width: 100%; height: 90vh;
     }
     #plz-search {
       padding: 10px;
       background: #f8f8f8;
       font-family: sans-serif;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
     }
     .plz-label {
-      font-size: 10px;
+      font-size: 12px;
       font-weight: bold;
       background: transparent !important;
       padding: 0 !important;
       border: none !important;
       color: #333;
-      text-shadow: 1px 1px 1px white;
-      pointer-events: none;
     }
-    .marker-tt {
-      background-color: red;
-    }
-    .marker-tn {
-      background-color: green;
-    }
-    .marker-unbekannt {
-      background-color: rgba(128, 128, 128, 0.5);
-    }
-    .custom-marker {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      border: 1px solid white;
+    #debug-info {
+      font-size: 12px;
+      color: #555;
+      min-width: 200px;
     }
   </style>
 </head>
 <body>
-
   <div id="plz-search">
-    <label for="plzInput">PLZ eingeben: </label>
+    <label for="plzInput">PLZ eingeben:</label>
     <input type="text" id="plzInput" placeholder="z.B. 83022" />
     <button onclick="zoomToPLZ()">Suchen</button>
-    |
+    
+    <!-- Netzform Filter: TT und TN immer aktiv, Unbekannt per Checkbox -->
     <label>
-      <input type="checkbox" id="toggleMarkers" />
-      Marker immer anzeigen
+      <input type="checkbox" id="unknownMarkerToggle" />
+      Unbekannte Marker anzeigen
     </label>
-    |
-    <label>
-  <input type="checkbox" id="togglePlzLabels" checked />
-  PLZ-Labels anzeigen
-</label>
-
+    
+    <div id="debug-info">Lade Daten...</div>
   </div>
 
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-
   <script>
     const map = L.map('map').setView([51.2, 10.5], 6);
 
@@ -81,189 +65,198 @@
       attribution: '&copy; OpenStreetMap-Mitwirkende'
     }).addTo(map);
 
-    let geoLayer = null;
-    let plzLayers = [];
-    let lastHighlightedLayer = null;
-    let markerLayer = L.layerGroup().addTo(map);
-    let markerFeatures = [];
+    const ZOOM_RANGE = {
+      plz1: [6, 7],
+      plz2: [8, 9],
+      plz3: [10, 11],
+      plz5: [12, 20],
+      markers: [9, 20],
+    };
 
-    const ZOOM_TOOLTIP_MIN = 11;
-    const ZOOM_POLYGON_MIN = 11;
-    const ZOOM_POPUP_MIN = 11;
-    const ZOOM_MARKER_MIN = 10;
+    let layerPLZ1, layerPLZ2, layerPLZ3, layerPLZ5;
+    let markerLayer;
 
-    const netzkartenGeojsonURL = 'https://christoph-staudacher.github.io/Netzkartendaten/Netzformen.geojson'; // <-- Hier deinen Pfad einsetzen
+    const plzFeatures = [];
+    let markerCount = 0;
+    let plzCount = { plz1: 0, plz2: 0, plz3: 0, plz5: 0 };
 
-    // === PLZ-GeoJSON laden ===
-    fetch('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson')
-      .then(res => res.json())
-      .then(data => {
-        geoLayer = L.geoJSON(data, {
-          style: () => ({
-            fillColor: 'transparent',
-            fillOpacity: 0,
-            weight: 0,
-            color: 'transparent',
-          }),
-          onEachFeature: (feature, layer) => {
-            const plz = feature.properties.plz;
-            const einw = feature.properties.einwohner || 'k.A.';
-            const note = feature.properties.note || '';
-            const qkm = feature.properties.qkm || 0;
+    function inZoomRange(zoom, range) {
+      return zoom >= range[0] && zoom <= range[1];
+    }
 
-            layer._myData = { plz, einw, note, qkm, popupAdded: false, tooltipAdded: false };
-            plzLayers.push({ plz, layer });
-          }
-        }).addTo(map);
+    async function loadPLZLayer(url, color, plzKey) {
+      const res = await fetch(url);
+      const data = await res.json();
+      plzCount[plzKey] = data.features.length;
+      return L.geoJSON(data, {
+        style: {
+          color: color,
+          weight: 2,
+          fillOpacity: 0,
+        },
+        onEachFeature: (feature, layer) => {
+          const plz = feature.properties.plz || '';
+          const einw = feature.properties.einwohner || 'k.A.';
+          const note = feature.properties.note || '';
 
-        updateFeaturesByZoom();
+          layer.bindPopup(`<strong>PLZ:</strong> ${plz}<br><strong>Einwohner:</strong> ${einw}<br><em>${note}</em>`);
+
+          layer._plz = plz;
+          layer._plzKey = plzKey;
+          layer._tooltipAdded = false;
+
+          plzFeatures.push(layer);
+        }
       });
+    }
 
-    // === Netzkarte-Marker laden ===
-    fetch(netzkartenGeojsonURL)
-      .then(res => res.json())
-      .then(data => {
-        markerFeatures = data.features.map(feature => {
-          const type = (feature.properties.Netzform || '').toUpperCase();
-          let cssClass = 'marker-unbekannt';
+    async function loadMarkers(url) {
+      const res = await fetch(url);
+      const data = await res.json();
+      markerCount = data.features.length;
 
-          if (type === 'TT') cssClass = 'marker-tt';
-          else if (type === 'TN') cssClass = 'marker-tn';
-
-          const icon = L.divIcon({
-            className: `custom-marker ${cssClass}`,
-            iconSize: [16, 16]
-          });
-
-          const marker = L.marker([feature.geometry.coordinates[1], feature.geometry.coordinates[0]], {
-            icon
-          });
-
-          marker._geoBounds = L.latLngBounds([marker.getLatLng()]);
-          return marker;
-        });
-
-        updateMarkersByZoom();
+      markerLayer = L.geoJSON(data, {
+        pointToLayer: (feature, latlng) => {
+          const typ = feature.properties.Netzform || '';
+          let color = 'gray';
+          let opacity = 0.5;
+          if (typ === 'TT') { color = 'red'; opacity = 1; }
+          if (typ === 'TN') { color = 'green'; opacity = 1; }
+          return L.circleMarker(latlng, {
+            radius: 6,
+            color,
+            fillColor: color,
+            fillOpacity: opacity,
+            weight: 1,
+          }).bindPopup(`<strong>Netzform:</strong> ${typ || 'Unbekannt'}`);
+        }
       });
-
-function zoomToPLZ() {
-  const input = document.getElementById('plzInput').value.trim();
-  const found = plzLayers.find(p => p.plz === input);
-  if (found) {
-    const bounds = found.layer.getBounds();
-    map.fitBounds(bounds, { maxZoom: ZOOM_POPUP_MIN });
-    found.layer.openPopup();
-
-    // Alte Hervorhebung entfernen
-    if (lastHighlightedLayer) {
-      lastHighlightedLayer.setStyle({ fillColor: 'transparent', fillOpacity: 0 });
     }
 
-    // Neue Hervorhebung gelb
-    found.layer.setStyle({ fillColor: 'yellow', fillOpacity: 0.2 });
-    lastHighlightedLayer = found.layer;
-  } else {
-    alert('PLZ nicht gefunden oder Daten noch nicht geladen.');
-  }
-}
+    async function loadAll() {
+      layerPLZ1 = await loadPLZLayer('https://christoph-staudacher.github.io/Netzkartendaten/plz-1stellig.geojson', '#999', 'plz1');
+      layerPLZ2 = await loadPLZLayer('https://christoph-staudacher.github.io/Netzkartendaten/plz-2stellig.geojson', '#666', 'plz2');
+      layerPLZ3 = await loadPLZLayer('https://christoph-staudacher.github.io/Netzkartendaten/plz-3stellig.geojson', '#444', 'plz3');
+      layerPLZ5 = await loadPLZLayer('https://christoph-staudacher.github.io/Netzkartendaten/plz-5stellig.geojson', '#333', 'plz5');
 
+      await loadMarkers('https://christoph-staudacher.github.io/Netzkartendaten/Netzformen.geojson');
 
-    // === Tooltip & Umriss aktualisieren ===
-function updateFeaturesByZoom() {
-  const zoom = map.getZoom();
-  const bounds = map.getBounds();
-  const labelToggle = document.getElementById('togglePlzLabels');
-  const showTooltipAllowed = labelToggle && labelToggle.checked;
-
-  if (!geoLayer) return;
-
-  geoLayer.eachLayer(layer => {
-    const d = layer._myData;
-    if (!d) return;
-
-    const inView = bounds.intersects(layer.getBounds());
-
-    // === Linien-Sichtbarkeit ===
-    const showLine = zoom >= ZOOM_POLYGON_MIN && inView;
-    layer.setStyle({
-      weight: showLine ? 2.5 : 0,
-      color: showLine ? '#333' : 'transparent',
-      fillOpacity: (lastHighlightedLayer === layer) ? 0.2 : 0,
-      fillColor: (lastHighlightedLayer === layer) ? 'yellow' : 'transparent'
-    });
-
-    // === Tooltip-Sichtbarkeit ===
-    const showTooltip = zoom >= ZOOM_TOOLTIP_MIN && inView;
-    const finalShowTooltip = showTooltip && showTooltipAllowed;
-
-    if (finalShowTooltip && !d.tooltipAdded) {
-      const tooltip = L.tooltip({
-        permanent: true,
-        direction: 'center',
-        className: 'plz-label',
-        opacity: 1
-      }).setContent(d.plz);
-      layer.bindTooltip(tooltip);
-      d.tooltipAdded = true;
+      updateLayers();
+      applyMarkerFilter();
+      updateDebugInfo();
     }
 
-    // === Tooltip ein-/ausblenden ===
-    if (d.tooltipAdded && layer.getTooltip()) {
-      const el = layer.getTooltip().getElement();
-      if (el) el.style.display = finalShowTooltip ? 'block' : 'none';
+    function updateLayers() {
+      const zoom = map.getZoom();
+
+      toggleLayer(layerPLZ1, ZOOM_RANGE.plz1);
+      toggleLayer(layerPLZ2, ZOOM_RANGE.plz2);
+      toggleLayer(layerPLZ3, ZOOM_RANGE.plz3);
+      toggleLayer(layerPLZ5, ZOOM_RANGE.plz5);
+
+      if (markerLayer) {
+        if (inZoomRange(zoom, ZOOM_RANGE.markers)) {
+          if (!map.hasLayer(markerLayer)) map.addLayer(markerLayer);
+          applyMarkerFilter();
+        } else {
+          if (map.hasLayer(markerLayer)) map.removeLayer(markerLayer);
+        }
+      }
+
+      updateTooltips();
+      updateDebugInfo();
     }
 
-    // === Popup bei Zoom 9+ ===
-    if (zoom >= ZOOM_POPUP_MIN && !d.popupAdded) {
-      const popup = `<strong>PLZ:</strong> ${d.plz}<br><strong>Einwohner:</strong> ${d.einw}<br><em>${d.note}</em>`;
-      layer.bindPopup(popup);
-      d.popupAdded = true;
+    function toggleLayer(layer, zoomRange) {
+      if (!layer) return;
+      const zoom = map.getZoom();
+      if (inZoomRange(zoom, zoomRange)) {
+        if (!map.hasLayer(layer)) map.addLayer(layer);
+      } else {
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+      }
     }
-  });
-}
 
-
-    // === Markeranzeige aktualisieren ===
-    function updateMarkersByZoom() {
+    function updateTooltips() {
       const zoom = map.getZoom();
       const bounds = map.getBounds();
-      const alwaysVisible = document.getElementById('toggleMarkers').checked;
 
-      markerLayer.clearLayers();
+      plzFeatures.forEach(layer => {
+        const inRange = inZoomRange(zoom, ZOOM_RANGE[layer._plzKey] || [0,0]);
+        const visibleInMap = bounds.intersects(layer.getBounds());
 
-      markerFeatures.forEach(marker => {
-        const inView = bounds.intersects(marker._geoBounds);
-        const showMarker = alwaysVisible || (zoom >= ZOOM_MARKER_MIN && inView);
+        const showTooltip = inRange && visibleInMap;
 
-        if (showMarker) {
-          markerLayer.addLayer(marker);
+        if (showTooltip && !layer._tooltipAdded) {
+          layer.bindTooltip(layer._plz, {
+            permanent: true,
+            direction: 'center',
+            className: 'plz-label',
+            opacity: 1,
+          });
+          layer._tooltipAdded = true;
+        }
+        if (layer.getTooltip()) {
+          const el = layer.getTooltip().getElement();
+          if (el) el.style.display = showTooltip ? 'block' : 'none';
         }
       });
     }
 
-    // === Eventlistener ===
-    map.on('zoomend', () => {
-      updateFeaturesByZoom();
-      updateMarkersByZoom();
-    });
+    function applyMarkerFilter() {
+      if (!markerLayer) return;
+      const showUnknown = document.getElementById('unknownMarkerToggle').checked;
 
-    map.on('moveend', () => {
-      updateFeaturesByZoom();
-      updateMarkersByZoom();
-    });
+      markerLayer.eachLayer(layer => {
+        const typ = layer.feature.properties.Netzform || '';
+        let visible = false;
 
-    // === Enter-Taste im Eingabefeld aktiviert Suche ===
-    document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('plzInput').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          zoomToPLZ();
+        if (typ === 'TT' || typ === 'TN') {
+          visible = true;
+        } else if (typ === '' || typ == null) {
+          visible = showUnknown;
         }
+
+        const opacity = visible ? 1 : 0;
+        layer.setStyle({ opacity, fillOpacity: opacity });
+      });
+    }
+
+    function zoomToPLZ() {
+      const input = document.getElementById('plzInput').value.trim();
+
+      plzFeatures.forEach(layer => {
+        layer.setStyle({ fillColor: 'transparent', fillOpacity: 0, color: '#000', weight: 1.5 });
       });
 
-      document.getElementById('toggleMarkers').addEventListener('change', () => {
-        updateMarkersByZoom();
-      });
+      const found = plzFeatures.find(l => l._plz === input);
+      if (found) {
+        map.fitBounds(found.getBounds(), { maxZoom: 12 });
+        found.openPopup();
+        found.setStyle({ fillColor: 'yellow', fillOpacity: 0.3, color: '#333', weight: 2 });
+      } else {
+        alert('PLZ nicht gefunden oder noch nicht geladen.');
+      }
+    }
+
+    function updateDebugInfo() {
+      document.getElementById('debug-info').innerText =
+        `Geladen: PLZ1=${plzCount.plz1}, PLZ2=${plzCount.plz2}, PLZ3=${plzCount.plz3}, PLZ5=${plzCount.plz5}, Marker=${markerCount}`;
+    }
+
+    map.on('zoomend', updateLayers);
+    map.on('moveend', updateTooltips);
+
+    document.getElementById('unknownMarkerToggle').addEventListener('change', applyMarkerFilter);
+
+    document.getElementById('plzInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        zoomToPLZ();
+      }
     });
+
+    loadAll();
   </script>
 </body>
 </html>
